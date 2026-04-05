@@ -25,32 +25,14 @@ class YoutubeScraper:
     VERIFIED_STYLES = {"BADGE_STYLE_TYPE_VERIFIED"}
     VERIFIED_ICONS  = {"CHECK_CIRCLE_THICK"}
 
-    def __init__(self, output_dir='scraped_data'):
+    def __init__(self, output_dir='scraped_data', logger=None, session=None):
         """
         Initialize scraper with logging and rate limiting.
         """
 
-        # Setup file-based logging — all events will be written to scraper.log
-        logging.basicConfig(
-            filename='scraper.log',
-            filemode='a',
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-        )
-        self.logger = logging.getLogger(__name__)
-
-        self.session = requests.Session()
-        self.session.headers.update(self.BASE_HEADERS)
-
-        retry_strategy = Retry(
-            total=3, 
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504], 
-            allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.logger = logger
+        self.session = session
+        
 
         self.rate_limit = 10 
         self.time_window = 60
@@ -401,21 +383,3 @@ class YoutubeScraper:
             self.logger.info(f"Data exported to {base_filename}.csv")
         except Exception as e:
             self.logger.error(f"Failed to export data: {e}")
-                                                       
-
-if __name__ == "__main__":
-    scraper = YoutubeScraper()
- 
-    video_ids = [
-        "K5KVEU3aaeQ",
-        "dQw4w9WgXcQ",
-        "dH8FK2FXGZM",
-        "fbIiEdOc0So",
-        "XVUxkkSJATA",
-        "FOOsx9ytTzg"
-    ]
- 
-    df = scraper.scrape_videos(video_ids)
-    print(df[["video_id", "chapter_count", "is_age_restricted",
-               "card_count", "is_verified","comments_disabled","has_paid_promotion"]].to_string())
-    print(df.columns)
