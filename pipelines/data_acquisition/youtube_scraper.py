@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from collections import deque
 from bs4 import BeautifulSoup
 from urllib3 import Retry
+from tqdm import tqdm
 import pandas as pd
 import requests
 import logging
@@ -34,7 +35,7 @@ class YoutubeScraper:
         self.session = session
         
 
-        self.rate_limit = 10 
+        self.rate_limit = 100 
         self.time_window = 60
         self.request_times = deque()
 
@@ -55,7 +56,7 @@ class YoutubeScraper:
                 f"Resuming: {len(scraped_ids)} already done, {len(pending)} remaining."
             )
 
-        for vid_id in pending:
+        for vid_id in tqdm(pending):
             url = self.BASE_URL + vid_id
             self.logger.info(f"Scraping video: {vid_id}")
  

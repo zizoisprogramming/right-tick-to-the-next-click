@@ -76,7 +76,8 @@ class YoutubePipeline:
         return final_df
     
 
-pipeline = YoutubePipeline()
-df = pipeline.run()
-print(df.shape)
-print(df[:5])
+# pipeline = YoutubePipeline()
+# df = pipeline.run()
+# df.to_csv("example.csv")
+# print(df.shape)
+# print(df[:5])
