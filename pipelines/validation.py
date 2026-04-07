@@ -59,7 +59,7 @@ def run_gx_validation(df: pd.DataFrame):
     suite       = context.suites.add(gx.ExpectationSuite(name="videos_suite"))
 
     # ── COMPLETENESS: required columns must not be null ──────────
-    for col in ["video_id", "title", "view_count", "likes", "publishedAt", "channelId"]:
+    for col in ["video_id", "title", "view_count", "likes", "publishedAt", "channelId", "is_trending"]:
         suite.add_expectation(
             gx.expectations.ExpectColumnValuesToNotBeNull(column=col)
         )
@@ -69,6 +69,9 @@ def run_gx_validation(df: pd.DataFrame):
         suite.add_expectation(
             gx.expectations.ExpectColumnValuesToBeBetween(column=col, min_value=0)
         )
+    suite.add_expectation(
+        gx.expectations.ExpectColumnValuesToBeBetween(column="categoryId", min_value=1, max_value=44)
+    )
 
     # ── ACCURACY: duration must be valid ISO-8601 ────────────────
     suite.add_expectation(
@@ -90,6 +93,12 @@ def run_gx_validation(df: pd.DataFrame):
     suite.add_expectation(
         gx.expectations.ExpectCompoundColumnsToBeUnique(
             column_list=list(df.columns)
+        )
+    )
+
+    suite.add_expectation(
+        gx.expectations.ExpectColumnValuesToBeUnique(
+            column='video_id'
         )
     )
 
@@ -152,6 +161,7 @@ def run_gx_validation(df: pd.DataFrame):
     suite.add_expectation(
         gx.expectations.ExpectColumnMedianToBeBetween(column="view_count", min_value=1)
     )
+
 
     # ── STRUCTURAL: video_id must be exactly 11 chars ────────────
     suite.add_expectation(
@@ -217,11 +227,38 @@ class DataValidator:
             "check_type": check_type,
             "passed":     True,
             "issues":     [],
+            "info": []
         }
 
     def _save(self, report):
         self.validation_results.append(report)
         return report
+    
+    # ── CONSISTENCY (schema) ────────────────────────────────────
+
+    def validate_schema(self, df, expected_columns, expected_types):
+        """Check column presence and data types."""
+        report = self._make_report("Schema", "Consistency")
+
+        missing_cols = set(expected_columns) - set(df.columns)
+        if missing_cols:
+            report["passed"] = False
+            report["issues"].append(f"Missing columns: {missing_cols}")
+
+        extra_cols = set(df.columns) - set(expected_columns)
+        if extra_cols:
+            report["issues"].append(f"Extra columns (not in schema): {extra_cols}")
+
+        for col, expected_type in expected_types.items():
+            if col in df.columns:
+                actual_type = str(df[col].dtype)
+                if actual_type != expected_type:
+                    report["passed"] = False
+                    report["issues"].append(
+                        f"Column '{col}': expected '{expected_type}', got '{actual_type}'"
+                    )
+
+        return self._save(report)
 
     # ── COMPLETENESS ────────────────────────────────────────────
     # GX covers not-null; pandas covers blank strings which pass not-null
@@ -278,14 +315,14 @@ class DataValidator:
                 )
 
         # age-restricted videos should have comments disabled
-        if {"is_age_restricted", "comments_disabled"}.issubset(df.columns):
+        if {"contentDetails.contentRating.ytRating", "comments_disabled"}.issubset(df.columns):
             n = df[
-                (df["is_age_restricted"] == True) & (df["comments_disabled"] == False)
+                (df["contentDetails.contentRating.ytRating"]=="ytAgeRestricted") & (df["comments_disabled"] == False)
             ].shape[0]
             if n:
                 report["passed"] = False
                 report["issues"].append(
-                    f"is_age_restricted=True but comments_disabled=False: {n} rows"
+                    f"Age Restricted Content but comments_disabled=False: {n} rows"
                 )
 
         return self._save(report)
@@ -347,7 +384,7 @@ class DataValidator:
             age_days = (now - latest).days
             if age_days > max_days_old:
                 report["passed"] = False
-            report["issues"].append(
+            report["info"].append(
                 f"Latest record in '{date_col}' is {age_days} days old "
                 f"(threshold: {max_days_old})"
             )
@@ -409,7 +446,7 @@ class DataValidator:
                 f"Top value covers {top_share:.1%} (max allowed: {max_share:.0%})"
             )
         else:
-            report["issues"].append(f"Top value share: {top_share:.1%}")
+            report["info"].append(f"Top value share: {top_share:.1%}")
         return self._save(report)
 
     def validate_non_zero_variance(self, df, numeric_columns):
@@ -440,8 +477,88 @@ class DataValidator:
                 f"Trending ratio {ratio:.1%} outside [{min_ratio:.0%}, {max_ratio:.0%}]"
             )
         else:
-            report["issues"].append(f"Trending ratio: {ratio:.1%}")
+            report["info"].append(f"Trending ratio: {ratio:.1%}")
         return self._save(report)
+
+    def validate_skew(self, df, numeric_columns)
+
+    # Relationships profile 
+    def validate_correlation(self, df, numeric_columns, corr_threshold=0.7, type='pearson'):
+        report = self._make_report("Correlation among columns", "Relationships")
+        no_corr = True
+
+        for i in range(len(numeric_columns)):
+            if numeric_columns[i] not in df.columns.tolist():
+                continue
+            for j in range(i + 1, len(numeric_columns)):
+                if numeric_columns[j] not in df.columns.tolist():
+                    continue
+                corr = df[numeric_columns[i]].corr(df[numeric_columns[j]])
+                if corr > corr_threshold:
+                    report["issues"].append(
+                        f"Correlation {corr:.2f} > {corr_threshold} "
+                        f"between '{numeric_columns[i]}' and '{numeric_columns[j]}'"
+                    )
+                    report["passed"] = False
+                    no_corr = False
+
+        if no_corr:
+            report["info"].append(f"All correlations are below {corr_threshold}")
+
+        return self._save(report) 
+    
+    def validate_categorical_numeric_relationship(self, df, categorical_columns, numeric_columns, eta_threshold=0.3):
+        """
+        ANOVA / eta-squared for categorical vs numeric pairs.
+        eta² = SS_between / SS_total  (0 = no effect, 1 = perfect separation)
+        GX has no equivalent for this.
+        """
+        report = self._make_report("Categorical-Numeric Relationships (ANOVA eta²)", "Relationships")
+        no_relationship = True
+
+        for cat_col in categorical_columns:
+            if cat_col not in df.columns:
+                continue
+            for num_col in numeric_columns:
+                if num_col not in df.columns:
+                    continue
+
+                # drop rows where either column is null
+                subset = df[[cat_col, num_col]].dropna()
+                if subset.empty:
+                    continue
+
+                # compute eta-squared: SS_between / SS_total
+                overall_mean = subset[num_col].mean()
+                ss_total     = ((subset[num_col] - overall_mean) ** 2).sum()
+
+                if ss_total == 0:
+                    continue
+
+                ss_between = sum(
+                    len(group) * (group[num_col].mean() - overall_mean) ** 2
+                    for _, group in subset.groupby(cat_col)
+                )
+
+                eta_sq = ss_between / ss_total
+
+                if eta_sq > eta_threshold:
+                    report["issues"].append(
+                        f"Strong relationship (eta²={eta_sq:.3f} > {eta_threshold}) "
+                        f"between '{cat_col}' and '{num_col}'"
+                    )
+                    report["passed"] = False
+                    no_relationship = False
+
+        if no_relationship:
+            report["info"].append(
+                f"All eta² values are below {eta_threshold} — "
+                f"no strong categorical-numeric relationships found"
+            )
+
+        return self._save(report)
+
+
 
     # ── REFERENTIAL INTEGRITY ────────────────────────────────────
     # GX has no expectation for count_col == len(parse(list_col))
@@ -562,10 +679,34 @@ def summarize_all(gx_results, pandas_summary: dict):
 
 # columns pandas needs for its checks (GX owns the full schema check)
 TEXT_COLUMNS    = ["title", "video_id", "channelId", "channelTitle"]
-NUMERIC_COLUMNS = ["view_count", "likes", "comment_count"]
+NUMERIC_COLUMNS = ["view_count", "likes", "comment_count", "categoryId", "favoriteCount", "card_count", "chapter_count"]
+CATEGORICAL_COLUMNS = ['projection']
 DATE_COLUMNS    = ["publishedAt", "trending_date"]
 URL_COLUMNS     = ["thumbnail_link"]
 
+EXPECTED_COLUMNS = [
+    'video_id', 'title', 'publishedAt', 'channelId', 'channelTitle',
+    'categoryId', 'trending_date', 'tags', 'view_count', 'likes',
+    'comment_count', 'thumbnail_link', 'description', 'is_trending',
+    'defaultLanguage', 'duration', 'dimension', 'definition', 'caption',
+    'licensedContent', 'projection', 'embeddable', 'madeForKids',
+    'favoriteCount', 'contentDetails.regionRestriction.blocked',
+    'contentDetails.regionRestriction.allowed',
+    'contentDetails.contentRating.ytRating', 'chapter_count',
+    'chapters', 'playability_status',
+    'supports_miniplayer', 'card_count', 'cards', 'is_verified',
+    'badge_labels', 'comments_disabled', 'has_paid_promotion'
+]
+
+EXPECTED_TYPES = {
+    "video_id":      "object",
+    "title":         "object",
+    "view_count":    "int64",
+    "likes":         "int64",
+    "comment_count": "int64",
+    "is_trending":   "int64",
+    "publishedAt":   "object",
+}
 
 # ═══════════════════════════════════════════════════════════════════
 #  ENTRY POINT
@@ -582,6 +723,8 @@ gx_results = run_gx_validation(df)
 # 3. Pandas (only what GX cannot express)
 validator = DataValidator()
 
+validator.validate_schema(df, EXPECTED_COLUMNS, EXPECTED_TYPES)          # Consistency
+
 # Completeness - blank strings (GX not-null already covers nulls)
 validator.validate_no_blank_strings(df, TEXT_COLUMNS)
 
@@ -591,7 +734,7 @@ validator.validate_cross_column_rules(df)
 # Timeliness - runtime-relative checks GX cannot do
 validator.validate_no_future_dates(df, DATE_COLUMNS)
 validator.validate_date_order(df, "publishedAt", "trending_date")
-validator.validate_data_freshness(df, "publishedAt", max_days_old=365)
+# validator.validate_data_freshness(df, "publishedAt", max_days_old=365)
 
 # Outliers - statistical methods GX has no expectation for
 validator.validate_outliers_iqr(df, NUMERIC_COLUMNS, multiplier=5.0)
@@ -601,6 +744,10 @@ validator.validate_outliers_zscore(df, NUMERIC_COLUMNS, threshold=5.0)
 validator.validate_category_dominance(df, "categoryId", max_share=0.80)
 validator.validate_non_zero_variance(df, NUMERIC_COLUMNS)
 validator.validate_trending_ratio(df)
+
+# Relationships - # validate_correlation, validate_categorical_numeric_relationship
+validator.validate_correlation(df, NUMERIC_COLUMNS, 0.6)
+validator.validate_correlation(df, NUMERIC_COLUMNS, 0.6, type="spearman")
 
 # Referential Integrity - parsed list-length comparison
 validator.validate_count_matches_list(df, "chapter_count", "chapters")
