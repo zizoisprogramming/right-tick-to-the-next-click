@@ -1,4 +1,5 @@
 import ast
+import json
 import re
 from datetime import datetime
 from itertools import groupby
@@ -7,6 +8,17 @@ import great_expectations as gx
 import numpy as np
 import pandas as pd
 
+
+def extract_hl_list_from_file(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        json_data = json.load(f)
+
+    return [item["snippet"]["hl"] for item in json_data.get("items", [])]
+
+def normalize_lang(lang):
+    if not lang:
+        return lang
+    return lang.split("-")[0].lower()
 
 def quick_summary(df: pd.DataFrame):
     """Fast dataset snapshot printed before any validation runs."""
@@ -42,16 +54,7 @@ def quick_summary(df: pd.DataFrame):
 
 
 def run_gx_validation(df: pd.DataFrame):
-    """
-    GX owns every check that can be expressed as a declarative expectation:
-      - not-null               → Completeness
-      - value >= 0 / regex     → Accuracy
-      - compound uniqueness    → Uniqueness
-      - column set / dtypes    → Consistency
-      - categorical sets       → Consistency
-      - row count / median     → Distribution
-      - value length           → Structural
-    """
+
     context     = gx.get_context(mode="ephemeral")
     data_source = context.data_sources.add_pandas(name="pandas_source")
     data_asset  = data_source.add_dataframe_asset(name="videos_asset")
@@ -64,11 +67,13 @@ def run_gx_validation(df: pd.DataFrame):
             gx.expectations.ExpectColumnValuesToNotBeNull(column=col)
         )
 
-    # ── ACCURACY: numeric lower bounds ──────────────────────────
+    # ── ACCURACY: numeric bounds ──────────────────────────
     for col in ["view_count", "likes", "comment_count", "favoriteCount"]:
         suite.add_expectation(
             gx.expectations.ExpectColumnValuesToBeBetween(column=col, min_value=0)
         )
+
+    # ── ACCURACY: categoryId must be between 1 and 44 (standard) ─────────
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToBeBetween(column="categoryId", min_value=1, max_value=44)
     )
@@ -77,7 +82,7 @@ def run_gx_validation(df: pd.DataFrame):
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToMatchRegex(
             column="duration",
-            regex=r"^P(?:(\d+)D)?T(?=\d+[HMS])(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$"
+            regex=r"^P(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?$"
         )
     )
 
@@ -90,12 +95,15 @@ def run_gx_validation(df: pd.DataFrame):
     )
 
     # ── UNIQUENESS: composite key ────────────────────────────────
+    # Full-row dedup: video_id repeats across dates and snapshots,
+    # so only an identical row in every column is a true duplicate.
     suite.add_expectation(
         gx.expectations.ExpectCompoundColumnsToBeUnique(
             column_list=list(df.columns)
         )
     )
 
+    # ── UNIQUENESS: key ────────────────────────────────
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToBeUnique(
             column='video_id'
@@ -125,27 +133,22 @@ def run_gx_validation(df: pd.DataFrame):
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToBeInSet(
             column="defaultLanguage",
-            value_set=[
-                "en", "en-US", "en-GB", "en-IN",
-                "ar", "ar-EG", "ar-SA",
-                "es", "es-ES", "es-419",
-                "fr", "fr-FR", "de", "it",
-                "pt", "pt-BR", "ru", "hi", "id",
-                "ja", "ko", "zh", "zh-CN", "zh-TW",
-                "tr", "nl", "pl", "sv", "th", "vi"
-            ]
+            value_set=extract_hl_list_from_file("data/youtube/hl_list.json")
         )
     )
+
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToBeInSet(
             column="dimension", value_set=["2d", "3d"]
         )
     )
+
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToBeInSet(
             column="definition", value_set=["hd", "sd"]
         )
     )
+
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToBeInSet(
             column="projection", value_set=["rectangular", "360"]
@@ -174,8 +177,17 @@ def run_gx_validation(df: pd.DataFrame):
     validation_def = context.validation_definitions.add(
         gx.ValidationDefinition(name="videos_validation", data=batch_def, suite=suite)
     )
+
     results = validation_def.run(batch_parameters={"dataframe": df})
     _print_gx_report(results)
+
+    context.build_data_docs()
+
+    try:
+        context.open_data_docs()
+    except Exception:
+        pass
+
     return results
 
 
@@ -202,21 +214,7 @@ def _print_gx_report(results):
     print("\n" + "=" * 65)
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  3.  PANDAS VALIDATOR  (only what GX cannot express)
-# ═══════════════════════════════════════════════════════════════════
-
 class DataValidator:
-    """
-    Pandas-only checks for logic that falls outside GX's declarative model:
-      Completeness  - blank strings
-      Accuracy      - cross-column business rules
-      Timeliness    - future dates, date order, dataset freshness
-      Outliers      - IQR extreme outliers, z-score extremes
-      Distribution  - category dominance, zero variance, trending ratio
-      Referential   - count_col vs actual len(list_col)
-    """
-
     def __init__(self):
         self.validation_results = []
 
@@ -234,8 +232,8 @@ class DataValidator:
         self.validation_results.append(report)
         return report
     
-    # ── CONSISTENCY (schema) ────────────────────────────────────
 
+    # ── CONSISTENCY (schema) ────────────────────────────────────
     def validate_schema(self, df, expected_columns, expected_types):
         """Check column presence and data types."""
         report = self._make_report("Schema", "Consistency")
@@ -262,26 +260,25 @@ class DataValidator:
 
     # ── COMPLETENESS ────────────────────────────────────────────
     # GX covers not-null; pandas covers blank strings which pass not-null
-
     def validate_no_blank_strings(self, df, text_columns):
-        """Empty-string cells that pass NOT NULL — GX cannot catch these."""
+        """Empty-string cells check"""
         report = self._make_report("Blank Strings", "Completeness")
+        
         for col in text_columns:
             if col not in df.columns:
                 continue
-            n = (df[col].astype(str).str.strip() == "").sum()
+            n = df[col].dropna().astype(str).str.strip().eq("").sum()
             if n:
                 report["passed"] = False
                 report["issues"].append(f"Column '{col}': {n} blank-string values")
         return self._save(report)
 
     # ── ACCURACY ────────────────────────────────────────────────
-    # GX covers per-column ranges & regex; pandas covers cross-column logic
+    # cross-column logic
 
     def validate_cross_column_rules(self, df):
         """
-        Business rules that span multiple columns — GX has no multi-column
-        conditional expectation for these patterns.
+        Business rules that span multiple columns
         """
         report = self._make_report("Cross-Column Rules", "Accuracy")
 
@@ -297,7 +294,7 @@ class DataValidator:
         # comments_disabled=True -> comment_count must be 0
         if {"comments_disabled", "comment_count"}.issubset(df.columns):
             n = df[
-                (df["comments_disabled"] == True) & (df["comment_count"] != 0)
+                (df["comments_disabled"].eq(True)) & (df["comment_count"] != 0)
             ].shape[0]
             if n:
                 report["passed"] = False
@@ -317,7 +314,7 @@ class DataValidator:
         # age-restricted videos should have comments disabled
         if {"contentDetails.contentRating.ytRating", "comments_disabled"}.issubset(df.columns):
             n = df[
-                (df["contentDetails.contentRating.ytRating"]=="ytAgeRestricted") & (df["comments_disabled"] == False)
+                (df["contentDetails.contentRating.ytRating"]=="ytAgeRestricted") & (df["comments_disabled"].eq(False))
             ].shape[0]
             if n:
                 report["passed"] = False
@@ -328,10 +325,8 @@ class DataValidator:
         return self._save(report)
 
     # ── TIMELINESS ──────────────────────────────────────────────
-    # GX has no built-in "must be in the past" or "col A <= col B" expectation
-
     def validate_no_future_dates(self, df, date_columns):
-        """GX cannot compare a column value to the current timestamp."""
+        """Ensuring correct dates"""
         report = self._make_report("No Future Dates", "Timeliness")
         now = pd.Timestamp.now(tz="UTC")
         for col in date_columns:
@@ -345,7 +340,7 @@ class DataValidator:
         return self._save(report)
 
     def validate_date_order(self, df, earlier_col, later_col):
-        """GX cannot enforce col A <= col B across two date columns."""
+        """Ensuring correct date ordering"""
         report = self._make_report(
             f"Date Order ({earlier_col} <= {later_col})", "Timeliness"
         )
@@ -357,6 +352,16 @@ class DataValidator:
 
         t1 = pd.to_datetime(df[earlier_col], errors="coerce", utc=True)
         t2 = pd.to_datetime(df[later_col],   errors="coerce", utc=True)
+
+        report["info"].append(f"{(t1.isna()|t2.isna()).sum()} rows skipped (null date in either column)")
+
+        unparseable = (df[earlier_col].notna() & t1.isna()).sum() + \
+                      (df[later_col].notna()   & t2.isna()).sum()
+        if unparseable:
+            report["issues"].append(
+                f"{unparseable} non-null values could not be parsed as dates"
+            )
+
         n  = (t1.notna() & t2.notna() & (t2 < t1)).sum()
         if n:
             report["passed"] = False
@@ -365,36 +370,9 @@ class DataValidator:
             )
         return self._save(report)
 
-    def validate_data_freshness(self, df, date_col, max_days_old=365):
-        """GX cannot compute how many days ago the latest record was created."""
-        report = self._make_report(
-            f"Data Freshness (<= {max_days_old} days)", "Timeliness"
-        )
-        if date_col not in df.columns:
-            report["issues"].append(f"Column '{date_col}' not found")
-            return self._save(report)
-
-        latest   = pd.to_datetime(df[date_col], errors="coerce", utc=True).max()
-        now      = pd.Timestamp.now(tz="UTC")
-
-        if pd.isna(latest):
-            report["passed"] = False
-            report["issues"].append(f"No valid dates in '{date_col}'")
-        else:
-            age_days = (now - latest).days
-            if age_days > max_days_old:
-                report["passed"] = False
-            report["info"].append(
-                f"Latest record in '{date_col}' is {age_days} days old "
-                f"(threshold: {max_days_old})"
-            )
-        return self._save(report)
-
     # ── OUTLIERS ────────────────────────────────────────────────
-    # GX has no IQR or z-score expectation
-
     def validate_outliers_iqr(self, df, numeric_columns, multiplier=5.0):
-        """GX has no IQR-based outlier expectation."""
+        """outliers detection using IQR"""
         report = self._make_report(f"Outliers - IQR x{multiplier}", "Outliers")
         for col in numeric_columns:
             if col not in df.columns:
@@ -402,6 +380,9 @@ class DataValidator:
             s = df[col].dropna()
             q1, q3 = s.quantile(0.25), s.quantile(0.75)
             iqr = q3 - q1
+            if iqr == 0:
+                report["info"].append(f"Column '{col}': IQR=0, skipping (zero-inflated column)")
+                continue
             lo, hi = q1 - multiplier * iqr, q3 + multiplier * iqr
             n = ((df[col] < lo) | (df[col] > hi)).sum()
             if n:
@@ -413,7 +394,7 @@ class DataValidator:
         return self._save(report)
 
     def validate_outliers_zscore(self, df, numeric_columns, threshold=5.0):
-        """GX has no z-score outlier expectation."""
+        """outliers detection using z-score"""
         report = self._make_report(f"Outliers - Z-score > {threshold}", "Outliers")
         for col in numeric_columns:
             if col not in df.columns:
@@ -421,7 +402,7 @@ class DataValidator:
             s = df[col].dropna()
             if s.std() == 0:
                 continue
-            n = ((df[col] - s.mean()).abs() / s.std() > threshold).sum()
+            n = ((df[col].dropna() - s.mean()).abs() / s.std() > threshold).sum()
             if n:
                 report["passed"] = False
                 report["issues"].append(
@@ -430,10 +411,8 @@ class DataValidator:
         return self._save(report)
 
     # ── DISTRIBUTION ────────────────────────────────────────────
-    # GX covers row count and median; pandas covers ratio/dominance/variance
-
     def validate_category_dominance(self, df, col, max_share=0.80):
-        """GX has no 'top category must not dominate' expectation."""
+        """no categry dominance"""
         report = self._make_report(f"Category Dominance '{col}'", "Distribution")
         if col not in df.columns:
             report["issues"].append(f"Column '{col}' not found")
@@ -450,7 +429,7 @@ class DataValidator:
         return self._save(report)
 
     def validate_non_zero_variance(self, df, numeric_columns):
-        """GX has no zero-variance / constant-column expectation."""
+        """constant-column detection"""
         report = self._make_report("Non-Zero Variance", "Distribution")
         for col in numeric_columns:
             if col not in df.columns:
@@ -462,30 +441,45 @@ class DataValidator:
                 )
         return self._save(report)
 
-    def validate_trending_ratio(self, df, col="is_trending",
-                                min_ratio=0.01, max_ratio=0.90):
-        """GX's mean expectation is close but ratio bounds are dataset-specific."""
-        report = self._make_report("Trending Ratio", "Distribution")
+    def validate_class_imbalance(
+        self,
+        df,
+        col="is_trending",
+        threshold=0.90,
+    ):
+        """class imbalance detetction"""
+        report = self._make_report("Class Imbalance", "Distribution")
+
         if col not in df.columns:
             report["issues"].append(f"Column '{col}' not found")
             return self._save(report)
 
-        ratio = df[col].mean()
-        if not (min_ratio <= ratio <= max_ratio):
+        vals = df[col].dropna().unique()
+        if not set(vals).issubset({0, 1}):
+            report["passed"] = False
+            report["issues"].append(f"Column '{col}' contains non-binary values: {set(vals) - {0,1}}")
+            return self._save(report)
+        counts = df[col].value_counts(normalize=True)
+        imbalance_ratio = counts.iloc[0]
+
+        if imbalance_ratio > threshold:
             report["passed"] = False
             report["issues"].append(
-                f"Trending ratio {ratio:.1%} outside [{min_ratio:.0%}, {max_ratio:.0%}]"
+                f"Severe class imbalance: dominant class = {imbalance_ratio:.1%}"
             )
         else:
-            report["info"].append(f"Trending ratio: {ratio:.1%}")
+            p1 = counts.get(1, 0.0)
+            p0 = counts.get(0, 0.0)
+            report["info"].append(f"Class balance OK: class1={p1:.1%}, class0={p0:.1%}")
+
         return self._save(report)
 
-    def validate_skew(self, df, numeric_columns)
 
     # Relationships profile 
-    def validate_correlation(self, df, numeric_columns, corr_threshold=0.7, type='pearson'):
-        report = self._make_report("Correlation among columns", "Relationships")
-        no_corr = True
+    def validate_correlation(self, df, numeric_columns, corr_threshold=0.7, method='pearson'):
+        """validating numeric columns correlation"""
+        report = self._make_report(f"Correlation ({method})", "Relationships")
+        found_issue = False
 
         for i in range(len(numeric_columns)):
             if numeric_columns[i] not in df.columns.tolist():
@@ -493,78 +487,47 @@ class DataValidator:
             for j in range(i + 1, len(numeric_columns)):
                 if numeric_columns[j] not in df.columns.tolist():
                     continue
-                corr = df[numeric_columns[i]].corr(df[numeric_columns[j]])
-                if corr > corr_threshold:
+                corr = df[numeric_columns[i]].corr(df[numeric_columns[j]],method=method)
+                if abs(corr) > corr_threshold:
                     report["issues"].append(
                         f"Correlation {corr:.2f} > {corr_threshold} "
                         f"between '{numeric_columns[i]}' and '{numeric_columns[j]}'"
                     )
                     report["passed"] = False
-                    no_corr = False
+                    found_issue = True
 
-        if no_corr:
+        if not found_issue:
             report["info"].append(f"All correlations are below {corr_threshold}")
 
         return self._save(report) 
     
-    def validate_categorical_numeric_relationship(self, df, categorical_columns, numeric_columns, eta_threshold=0.3):
-        """
-        ANOVA / eta-squared for categorical vs numeric pairs.
-        eta² = SS_between / SS_total  (0 = no effect, 1 = perfect separation)
-        GX has no equivalent for this.
-        """
-        report = self._make_report("Categorical-Numeric Relationships (ANOVA eta²)", "Relationships")
-        no_relationship = True
+    def validate_skew(self, df, numeric_columns, skew_threshold=1):
+        """validating numeric columns skewness"""
+        report = self._make_report("Skewness", "Relationships")
+        found_issue = False
 
-        for cat_col in categorical_columns:
-            if cat_col not in df.columns:
+        for col in numeric_columns:
+            if col not in df.columns.tolist():
                 continue
-            for num_col in numeric_columns:
-                if num_col not in df.columns:
-                    continue
 
-                # drop rows where either column is null
-                subset = df[[cat_col, num_col]].dropna()
-                if subset.empty:
-                    continue
+            skew_val = df[col].skew()
 
-                # compute eta-squared: SS_between / SS_total
-                overall_mean = subset[num_col].mean()
-                ss_total     = ((subset[num_col] - overall_mean) ** 2).sum()
-
-                if ss_total == 0:
-                    continue
-
-                ss_between = sum(
-                    len(group) * (group[num_col].mean() - overall_mean) ** 2
-                    for _, group in subset.groupby(cat_col)
+            if abs(skew_val) > skew_threshold:
+                report["issues"].append(
+                    f"Skewness {skew_val:.2f} exceeds threshold {skew_threshold} in '{col}'"
                 )
+                report["passed"] = False
+                found_issue = True
 
-                eta_sq = ss_between / ss_total
-
-                if eta_sq > eta_threshold:
-                    report["issues"].append(
-                        f"Strong relationship (eta²={eta_sq:.3f} > {eta_threshold}) "
-                        f"between '{cat_col}' and '{num_col}'"
-                    )
-                    report["passed"] = False
-                    no_relationship = False
-
-        if no_relationship:
-            report["info"].append(
-                f"All eta² values are below {eta_threshold} — "
-                f"no strong categorical-numeric relationships found"
-            )
+        if not found_issue:
+            report["info"].append(f"All skewness values are within ±{skew_threshold}")
 
         return self._save(report)
 
 
-
     # ── REFERENTIAL INTEGRITY ────────────────────────────────────
-    # GX has no expectation for count_col == len(parse(list_col))
-
     def validate_count_matches_list(self, df, count_col, list_col):
-        """GX cannot parse a stringified list and compare its length to another column."""
+        """matching list columns with count columns"""
         report = self._make_report(
             f"Count Match: '{count_col}' vs len('{list_col}')",
             "Referential Integrity"
@@ -584,10 +547,17 @@ class DataValidator:
                 return -1
 
         actual   = df[list_col].apply(_len)
+        parse_errors  = (actual == -1).sum()
         mismatch = (
             actual.ge(0) &
             (df[count_col].fillna(0).astype(int) != actual)
         ).sum()
+
+        if parse_errors:
+            report["passed"] = False
+            report["issues"].append(
+                f"{parse_errors} rows in '{list_col}' could not be parsed as a list"
+            )
 
         if mismatch:
             report["passed"] = False
@@ -640,10 +610,6 @@ class DataValidator:
         }
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  4.  UNIFIED FINAL SCORECARD
-# ═══════════════════════════════════════════════════════════════════
-
 def summarize_all(gx_results, pandas_summary: dict):
     total_gx   = len(gx_results.results)
     passed_gx  = sum(r.success for r in gx_results.results)
@@ -673,11 +639,6 @@ def summarize_all(gx_results, pandas_summary: dict):
     print()
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════
-
-# columns pandas needs for its checks (GX owns the full schema check)
 TEXT_COLUMNS    = ["title", "video_id", "channelId", "channelTitle"]
 NUMERIC_COLUMNS = ["view_count", "likes", "comment_count", "categoryId", "favoriteCount", "card_count", "chapter_count"]
 CATEGORICAL_COLUMNS = ['projection']
@@ -708,10 +669,6 @@ EXPECTED_TYPES = {
     "publishedAt":   "object",
 }
 
-# ═══════════════════════════════════════════════════════════════════
-#  ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════
-
 df = pd.read_csv("api.csv")
 
 # 1. Quick snapshot
@@ -723,33 +680,34 @@ gx_results = run_gx_validation(df)
 # 3. Pandas (only what GX cannot express)
 validator = DataValidator()
 
-validator.validate_schema(df, EXPECTED_COLUMNS, EXPECTED_TYPES)          # Consistency
+# Consistency
+validator.validate_schema(df, EXPECTED_COLUMNS, EXPECTED_TYPES)         
 
-# Completeness - blank strings (GX not-null already covers nulls)
+# Completeness
 validator.validate_no_blank_strings(df, TEXT_COLUMNS)
 
 # Accuracy - cross-column conditional logic
 validator.validate_cross_column_rules(df)
 
-# Timeliness - runtime-relative checks GX cannot do
+# Timeliness
 validator.validate_no_future_dates(df, DATE_COLUMNS)
 validator.validate_date_order(df, "publishedAt", "trending_date")
-# validator.validate_data_freshness(df, "publishedAt", max_days_old=365)
 
-# Outliers - statistical methods GX has no expectation for
+# Outliers
 validator.validate_outliers_iqr(df, NUMERIC_COLUMNS, multiplier=5.0)
 validator.validate_outliers_zscore(df, NUMERIC_COLUMNS, threshold=5.0)
 
-# Distribution - ratio/dominance/variance checks GX row-count/median can't cover
+# Distribution
 validator.validate_category_dominance(df, "categoryId", max_share=0.80)
 validator.validate_non_zero_variance(df, NUMERIC_COLUMNS)
-validator.validate_trending_ratio(df)
+validator.validate_class_imbalance(df, "is_trending", threshold=0.90)
 
-# Relationships - # validate_correlation, validate_categorical_numeric_relationship
+# Relationships
 validator.validate_correlation(df, NUMERIC_COLUMNS, 0.6)
-validator.validate_correlation(df, NUMERIC_COLUMNS, 0.6, type="spearman")
+validator.validate_correlation(df, NUMERIC_COLUMNS, 0.6, method="spearman")
+validator.validate_skew(df,NUMERIC_COLUMNS, 0.6)
 
-# Referential Integrity - parsed list-length comparison
+# Referential Integrity
 validator.validate_count_matches_list(df, "chapter_count", "chapters")
 validator.validate_count_matches_list(df, "card_count", "cards")
 
