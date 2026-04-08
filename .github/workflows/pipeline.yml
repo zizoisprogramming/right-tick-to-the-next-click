@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-      - run: pip install -r requirements.txt gdown
+      - run: pip install -r requirements.txt
       - run: pip install -e .
       - name: Create .env file
         run: |
