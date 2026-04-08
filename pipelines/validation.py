@@ -13,7 +13,11 @@ def extract_hl_list_from_file(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         json_data = json.load(f)
 
-    return [item["snippet"]["hl"] for item in json_data.get("items", [])]
+    base_codes = {
+        item["snippet"]["hl"].split("-")[0].lower()
+        for item in json_data.get("items", [])
+    }
+    return list(base_codes)
 
 def normalize_lang(lang):
     if not lang:
@@ -255,6 +259,35 @@ class DataValidator:
                     report["issues"].append(
                         f"Column '{col}': expected '{expected_type}', got '{actual_type}'"
                     )
+
+        return self._save(report)
+    
+    def validate_default_language(self, df, hl_file_path="data/youtube/hl_list.json"):
+        """Default language values check against YouTube i18n language list"""
+        report = self._make_report("Default Language", "Consistency")
+
+        if "defaultLanguage" not in df.columns:
+            report["issues"].append("Column 'defaultLanguage' not found")
+            report["passed"] = False
+            return self._save(report)
+
+        hl_set = {
+            code.split("-")[0].lower()
+            for code in extract_hl_list_from_file(hl_file_path)
+        } | YOUTUBE_EXTRA_LANGS
+
+        invalid_values = (
+            df["defaultLanguage"]
+            .dropna()
+            .loc[lambda s: ~s.str.split("-").str[0].str.lower().isin(hl_set)]
+            .unique()
+        )
+
+        if len(invalid_values):
+            report["passed"] = False
+            report["issues"].append(
+                f"Column 'defaultLanguage': {len(invalid_values)} unrecognized value(s): {invalid_values.tolist()}"
+            )
 
         return self._save(report)
 
@@ -669,7 +702,12 @@ EXPECTED_TYPES = {
     "publishedAt":   "object",
 }
 
-df = pd.read_csv("api.csv")
+YOUTUBE_EXTRA_LANGS = {
+    "yue", "yue-hk", "bh", "bho", "mai", "sat", "bgc",
+    "chr", "mni", "vro", "ase", "mo", "bi", "und", "zxx", "sdp"
+}
+
+df = pd.read_csv("data/youtube/dataset.csv")
 
 # 1. Quick snapshot
 quick_summary(df)
@@ -681,7 +719,8 @@ gx_results = run_gx_validation(df)
 validator = DataValidator()
 
 # Consistency
-validator.validate_schema(df, EXPECTED_COLUMNS, EXPECTED_TYPES)         
+validator.validate_schema(df, EXPECTED_COLUMNS, EXPECTED_TYPES)  
+validator.validate_default_language(df)       
 
 # Completeness
 validator.validate_no_blank_strings(df, TEXT_COLUMNS)
