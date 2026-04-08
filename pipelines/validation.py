@@ -257,30 +257,32 @@ class DataValidator:
     def validate_default_language(self, df, hl_file_path="data/youtube/hl_list.json"):
         """Default language values check against YouTube i18n language list"""
         report = self._make_report("Default Language", "Consistency")
-
+    
         if "defaultLanguage" not in df.columns:
             report["issues"].append("Column 'defaultLanguage' not found")
             report["passed"] = False
             return self._save(report)
-
+    
         hl_set = {
             code.split("-")[0].lower()
             for code in extract_hl_list_from_file(hl_file_path)
         } | YOUTUBE_EXTRA_LANGS
-
-        invalid_values = (
-            df["defaultLanguage"]
-            .dropna()
-            .loc[lambda s: ~s.str.split("-").str[0].str.lower().isin(hl_set)]
-            .unique()
-        )
-
-        if len(invalid_values):
+    
+        series = df["defaultLanguage"].dropna()
+    
+        # mask for invalid rows
+        invalid_mask = ~series.str.split("-").str[0].str.lower().isin(hl_set)
+    
+        invalid_rows = series[invalid_mask]
+        invalid_count = invalid_mask.sum()
+    
+        if invalid_count > 0:
             report["passed"] = False
             report["issues"].append(
-                f"Column 'defaultLanguage': {len(invalid_values)} unrecognized value(s): {invalid_values.tolist()}"
+                f"Column 'defaultLanguage': {invalid_count} invalid row(s). "
+                f"Sample values: {invalid_rows.unique().tolist()[:5]}"
             )
-
+    
         return self._save(report)
 
     # ── COMPLETENESS ────────────────────────────────────────────
