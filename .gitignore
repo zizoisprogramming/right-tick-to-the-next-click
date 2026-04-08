@@ -1,0 +1,11 @@
+.env
+
+*.log
+*.pdf
+*.json
+data/
+*/__pycache__
+*/*/__pycache__
+*.py
+*.csv
+*.zip
