@@ -377,8 +377,8 @@ class DataValidator:
             )
             return self._save(report)
 
-        t1 = pd.to_datetime(df[earlier_col], errors="coerce", utc=True)
-        t2 = pd.to_datetime(df[later_col],   errors="coerce", utc=True)
+        t1 = pd.to_datetime(df[earlier_col], errors="coerce", utc=True).dt.date
+        t2 = pd.to_datetime(df[later_col],   errors="coerce", utc=True).dt.date
 
         report["info"].append(f"{(t1.isna()|t2.isna()).sum()} rows skipped (null date in either column)")
 
