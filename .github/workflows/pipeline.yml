@@ -32,6 +32,7 @@ jobs:
           cache: 'pip'
       - run: pip install -r requirements.txt
       - run: pip install -e .
+      - run: pip install gdown
       - name: Create .env file
         run: |
           echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
