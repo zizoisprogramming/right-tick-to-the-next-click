@@ -1,0 +1,136 @@
+name: who-will-viral Pipeline
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install ruff mypy bandit
+      - run: ruff check src/
+      - run: mypy src/ --ignore-missing-imports
+      - run: bandit -r src/ -ll
+
+  acquire:
+    needs: [code-quality]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - run: python src/who_will_viral/acquisition.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raw-data
+          path: data/raw/
+
+  validate:
+    needs: [acquire]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: raw-data
+          path: data/raw/
+      - run: python src/who_will_viral/validate.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validated-data
+          path: data/validated/
+
+  test:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements.txt pytest pytest-cov
+      - uses: actions/download-artifact@v4
+        with:
+          name: validated-data
+          path: data/validated/
+      - run: pytest tests/ --cov=src --cov-report=xml
+
+# --- uncomment each job as you build that stage ---
+
+#  clean:
+#    needs: [validate]
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: '3.11'
+#          cache: 'pip'
+#      - run: pip install -r requirements.txt
+#      - uses: actions/download-artifact@v4
+#        with:
+#          name: validated-data
+#          path: data/validated/
+#      - run: python src/who_will_viral/clean.py
+#      - uses: actions/upload-artifact@v4
+#        with:
+#          name: cleaned-data
+#          path: data/cleaned/
+
+#  feature-engineering:
+#    needs: [clean]
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: '3.11'
+#          cache: 'pip'
+#      - run: pip install -r requirements.txt
+#      - uses: actions/download-artifact@v4
+#        with:
+#          name: cleaned-data
+#          path: data/cleaned/
+#      - run: python src/who_will_viral/features.py
+#      - uses: actions/upload-artifact@v4
+#        with:
+#          name: features-data
+#          path: data/features/
+
+#  train:
+#    needs: [feature-engineering]
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: '3.11'
+#          cache: 'pip'
+#      - run: pip install -r requirements.txt
+#      - uses: actions/download-artifact@v4
+#        with:
+#          name: features-data
+#          path: data/features/
+#      - run: python src/who_will_viral/train.py
+#      - uses: actions/upload-artifact@v4
+#        with:
+#          name: model-artifacts
+#          path: models/
