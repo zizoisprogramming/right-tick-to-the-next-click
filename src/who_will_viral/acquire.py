@@ -7,9 +7,9 @@ import requests
 import logging
 import os
 
-from who_will_viral.data_acquisition.youtube_scraper import YoutubeScraper
-from who_will_viral.data_acquisition.youtube_database import YoutubeDatabase
-from who_will_viral.data_acquisition.youtube_api import YoutubeAPI 
+from pipelines.data_acquisition.youtube_scraper import YoutubeScraper
+from pipelines.data_acquisition.youtube_database import YoutubeDatabase
+from pipelines.data_acquisition.youtube_api import YoutubeAPI 
 
 
 class YoutubePipeline:
