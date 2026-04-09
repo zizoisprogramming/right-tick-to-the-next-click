@@ -1,17 +1,21 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
+
 from who_will_viral.feature_engineering.feature_extraction import FeatureExtraction
 from who_will_viral.feature_engineering.feature_scaling import FeatureScaling
 from who_will_viral.feature_engineering.feature_selection import FeatureSelection
 
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
 class FeatureEngineering:
     def __init__(self):
-        self.cleaned_path = "/Users/ziadsamer/Documents/who-will-viral/data/youtube/cleaned_dataset.csv"
-        self.train_path = "/Users/ziadsamer/Documents/who-will-viral/data/youtube/train.csv"
-        self.val_path = "/Users/ziadsamer/Documents/who-will-viral/data/youtube/val.csv"
-        self.test_path = "/Users/ziadsamer/Documents/who-will-viral/data/youtube/test.csv"
+        self.cleaned_path = os.getenv("CLEANED_PATH")
+        self.train_path = os.getenv("TRAIN_PATH")
+        self.val_path = os.getenv("VAL_PATH")
+        self.test_path = os.getenv("TEST_PATH")
 
         self.df = pd.read_csv(self.cleaned_path, keep_default_na=False)
 

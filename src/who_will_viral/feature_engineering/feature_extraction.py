@@ -20,8 +20,6 @@ EMOJIS_COLS = ["description", "title"]
 class FeatureExtraction:
     def __init__(self):
         self.model = SentenceTransformer("all-MiniLM-L6-v2", token=HF_TOKEN)
-        self.models_path = "/Users/ziadsamer/Documents/who-will-viral/data/models"
-
 
     # Functions used
     def _count_emojis(self, df):
@@ -111,8 +109,5 @@ class FeatureExtraction:
         df = self._count_emojis(df)
         df = self._region_features(df)
         df = self._get_best_embeddings(df)
-        df.to_csv("/Users/ziadsamer/Documents/who-will-viral/data/youtube/extracted.csv", index=False)
+        df.to_csv(os.getenv("EXTRACTED_PATH"), index=False)
         return df
-
-
-FeatureExtraction().run(pd.read_csv("/Users/ziadsamer/Documents/who-will-viral/data/youtube/cleaned_dataset.csv", keep_default_na=False))

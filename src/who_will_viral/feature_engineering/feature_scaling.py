@@ -1,7 +1,9 @@
 from sklearn.preprocessing import RobustScaler, StandardScaler
 import pandas as pd
 import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
 ALREADY_PROCESSED = [
     "lang_base",
@@ -18,9 +20,9 @@ class FeatureScaling:
         self.val_path = val_path
         self.test_path = test_path
 
-        self.scaled_train_path = os.path.join("/Users/ziadsamer/Documents/who-will-viral/data/youtube/scaled_train.csv")
-        self.scaled_val_path = os.path.join("/Users/ziadsamer/Documents/who-will-viral/data/youtube/scaled_val.csv")
-        self.scaled_test_path = os.path.join("/Users/ziadsamer/Documents/who-will-viral/data/youtube/scaled_test.csv")
+        self.scaled_train_path = os.getenv("SCALED_TRAIN_PATH")
+        self.scaled_val_path = os.getenv("SCALED_VAL_PATH")
+        self.scaled_test_path = os.getenv("SCALED_TEST_PATH")
 
 
     def run(self):
