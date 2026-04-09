@@ -171,7 +171,7 @@ jobs:
         with:
           name: cleaned-data
           path: ./data/youtube/
-      - run: python src/who_will_viral/features.py
+      - run: python src/who_will_viral/feature_engineering.py
       - uses: actions/upload-artifact@v4
         with:
           name: features-data
