@@ -39,7 +39,7 @@ COLUMNS_TO_DROP = [
 INT_COLUMNS  = ["view_count", "likes", "categoryId", "comment_count", "card_count", "is_trending", "chapter_count"]
 BOOL_COLUMNS = ["embeddable", "madeForKids", "supports_miniplayer", "is_verified", "has_paid_promotion", "comments_disabled"]
 LOG_COLUMNS  = ["view_count", "likes", "comment_count"]
-CAP_COLUMNS  = ["view_count", "likes", "comment_count"]
+CAP_COLUMNS  = ["view_count", "likes", "comment_count","chapter_count"]
 
 
 @dataclass
@@ -266,14 +266,17 @@ def apply_log_transformation(df, log: DecisionLog = None, columns=None, base="na
     return df
 
 
-def cap_outliers(df, log: DecisionLog = None, columns=None, method="iqr", iqr_multiplier=1.5, z_threshold=3):
+def cap_outliers(df, log: DecisionLog = None, columns=None, method="iqr", iqr_multiplier=1.5, z_threshold=3,upper_bound=20):
     """Cap outliers using IQR or Z-score."""
     columns = columns or CAP_COLUMNS
     total_capped = 0
     for col in columns:
         if col not in df.columns:
             continue
-        if method == "iqr":
+        if col == "chapter_count":
+            lower_cap = 0
+            upper_cap = upper_bound
+        elif method == "iqr":
             Q1, Q3 = df[col].quantile(0.25), df[col].quantile(0.75)
             IQR = Q3 - Q1
             lower_cap = Q1 - iqr_multiplier * IQR
@@ -290,7 +293,6 @@ def cap_outliers(df, log: DecisionLog = None, columns=None, method="iqr", iqr_mu
     if log:
         log.record("Outliers", f"Cap via {method} on {len(columns)} cols", total_capped, f"Clip to bounds", f"Outlier treatment using {method}")
     return df
-
 
 def build_youtube_pipeline(hl_file_path="data/youtube/hl_list.json") -> CleaningPipeline:
     """Build and return the YouTube cleaning pipeline."""
@@ -312,7 +314,7 @@ def build_youtube_pipeline(hl_file_path="data/youtube/hl_list.json") -> Cleaning
 
 
 if __name__ == "__main__":
-    df = pd.read_csv("data/youtube/dataset.csv")
+    df = pd.read_csv("data/youtube/dataset.csv", keep_default_na=False)
 
     pipeline = build_youtube_pipeline()
     cleaned_df = pipeline.fit_transform(df)
