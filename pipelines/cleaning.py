@@ -314,7 +314,7 @@ def build_youtube_pipeline(hl_file_path="data/youtube/hl_list.json") -> Cleaning
 
 
 if __name__ == "__main__":
-    df = pd.read_csv("data/youtube/dataset.csv", keep_default_na=False)
+    df = pd.read_csv("data/youtube/dataset.csv")
 
     pipeline = build_youtube_pipeline()
     cleaned_df = pipeline.fit_transform(df)
