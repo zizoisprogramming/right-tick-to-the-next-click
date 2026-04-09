@@ -19,7 +19,8 @@ EMBEDDINGS_COLS = ["tags_joined", "description", "title"]
 EMOJIS_COLS = ["description", "title"]
 class FeatureExtraction:
     def __init__(self):
-        self.model = SentenceTransformer("all-MiniLM-L6-v2", token=HF_TOKEN)
+        if not os.getenv("CI"):
+            self.model = SentenceTransformer("all-MiniLM-L6-v2", token=HF_TOKEN)
 
     # Functions used
     def _count_emojis(self, df):
@@ -98,7 +99,7 @@ class FeatureExtraction:
     def _get_best_embeddings(self, df):
         if os.getenv("CI"):
             for col in EMBEDDINGS_COLS:
-                for i in range(768):
+                for i in range(384):  
                     df[f"{col}_emb_{i}"] = 0.0
             return df
         for col in EMBEDDINGS_COLS:
