@@ -6,11 +6,6 @@ import logging
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Callable
-
-# ─────────────────────────────────────────────
-# Logging Setup
-# ─────────────────────────────────────────────
-
 import os
 
 os.makedirs("logs", exist_ok=True)
@@ -27,9 +22,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────
 
 YOUTUBE_EXTRA_LANGS = {
     "yue", "yue-hk", "bh", "bho", "mai", "sat", "bgc",
@@ -49,9 +41,6 @@ BOOL_COLUMNS = ["embeddable", "madeForKids", "supports_miniplayer", "is_verified
 LOG_COLUMNS  = ["view_count", "likes", "comment_count"]
 CAP_COLUMNS  = ["view_count", "likes", "comment_count"]
 
-# ─────────────────────────────────────────────
-# Decision Log
-# ─────────────────────────────────────────────
 
 @dataclass
 class DecisionEntry:
@@ -92,10 +81,6 @@ class DecisionLog:
             print(f"  Cleaned shape: {self.final_shape[0]:,} rows × {self.final_shape[1]} cols")
         print("═" * 80 + "\n")
 
-# ─────────────────────────────────────────────
-# Reusable Pipeline
-# ─────────────────────────────────────────────
-
 class CleaningPipeline:
     """
     A reusable, modular data cleaning pipeline.
@@ -128,9 +113,6 @@ class CleaningPipeline:
         self.log.final_shape = result.shape
         return result
 
-# ─────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────
 
 def extract_hl_list_from_file(file_path):
     """Load valid language codes from a YouTube hl_list JSON file."""
@@ -153,9 +135,6 @@ def process_tags(x):
         return [tag.strip() for tag in x.split(",") if tag.strip()]
     return []
 
-# ─────────────────────────────────────────────
-# Cleaning Steps  (all accept log= kwarg)
-# ─────────────────────────────────────────────
 
 def remove_duplicates(df, log: DecisionLog = None):
     """Remove duplicate rows and duplicate video IDs."""
@@ -312,9 +291,6 @@ def cap_outliers(df, log: DecisionLog = None, columns=None, method="iqr", iqr_mu
         log.record("Outliers", f"Cap via {method} on {len(columns)} cols", total_capped, f"Clip to bounds", f"Outlier treatment using {method}")
     return df
 
-# ─────────────────────────────────────────────
-# Build Pipeline
-# ─────────────────────────────────────────────
 
 def build_youtube_pipeline(hl_file_path="data/youtube/hl_list.json") -> CleaningPipeline:
     """Build and return the YouTube cleaning pipeline."""
@@ -334,9 +310,6 @@ def build_youtube_pipeline(hl_file_path="data/youtube/hl_list.json") -> Cleaning
     )
     return pipeline
 
-# ─────────────────────────────────────────────
-# Entry Point
-# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     df = pd.read_csv("data/youtube/dataset.csv")
