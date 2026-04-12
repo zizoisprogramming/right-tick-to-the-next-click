@@ -11,11 +11,8 @@ from imblearn.over_sampling import RandomOverSampler
 from sklearn.naive_bayes import GaussianNB
 from imblearn.under_sampling import TomekLinks
 from sklearn.metrics import (
-    accuracy_score, f1_score, roc_auc_score,
-    precision_score, recall_score,
-    classification_report, confusion_matrix,
-    ConfusionMatrixDisplay, RocCurveDisplay,
-    PrecisionRecallDisplay
+    f1_score,
+    classification_report
 )
 import os
 import optuna
@@ -24,9 +21,10 @@ from sklearn.svm import LinearSVC
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-from mlflow_utilities import setup_mlflow, run_experiment
+from .mlflow_utilities import setup_mlflow, run_experiment
 class ModelTrainer:
-    def __init__(self, train_path, val_path, test_path):
+    def __init__(self, train_path, val_path, test_path, cv=5):
+        self.cv = cv
         setup_mlflow()
         train = pd.read_csv(train_path)
         val   = pd.read_csv(val_path)
@@ -82,7 +80,7 @@ class ModelTrainer:
         search = GridSearchCV(
             estimator=model,
             param_grid=param_grid,
-            cv=5,  # Use 5 fold on training set
+            cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
         metrics, model = run_experiment(f"Gaussian NB {sampling}", search, X_train, y_train, self.X_val, self.y_val)
@@ -103,7 +101,7 @@ class ModelTrainer:
         search = GridSearchCV(
             estimator=knn,
             param_grid=param_grid,
-            cv=5,  # Use 5 fold on training set
+            cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
         metrics, model = run_experiment(f"Grid Search for KNN {sampling}", search, X_train, y_train, self.X_val, self.y_val)
@@ -123,7 +121,7 @@ class ModelTrainer:
         search = RandomizedSearchCV(
             estimator=ada,
             param_distributions=param_grid,
-            cv=5,  # Use 5 fold on training set
+            cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
             n_iter=15
         )
@@ -144,7 +142,7 @@ class ModelTrainer:
         search = GridSearchCV(
             estimator=svm_linear,
             param_grid=param_grid,
-            cv=5,  # Use 5 fold on training set
+            cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
         metrics, model = run_experiment(f"Grid Search for LinearSVC with squared_hinge loss {sampling}", search, X_train, y_train, self.X_val, self.y_val)
@@ -165,7 +163,7 @@ class ModelTrainer:
             estimator=RandomForestClassifier(random_state=42, class_weight='balanced' if sampling == 'balanced' else None),
             param_grid=param_grid,
             scoring='f1_macro',        
-            cv=3,
+            cv=self.cv,
             n_jobs=-1,
             verbose=1
         )
@@ -199,7 +197,7 @@ class ModelTrainer:
         search = GridSearchCV(
             estimator=model,
             param_grid=param_grid,
-            cv=5,  # Use 5 fold on training set
+            cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
         metrics, model = run_experiment(f"Grid Search for Logistic Regression {sampling}", search, X_train, y_train, self.X_val, self.y_val)
