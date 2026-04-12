@@ -9,15 +9,18 @@ from sklearn.metrics import (
     PrecisionRecallDisplay
 )
 import matplotlib.pyplot as plt
-BASE_DIR = Path(__file__).resolve().parents[2]  # go up to project root
-MLFLOW_TRACKING_URI = str(BASE_DIR / "mlruns")
+
+
+BASE_DIR = Path(__file__).resolve().parent  # models/
+
+MLFLOW_TRACKING_URI = (BASE_DIR / "mlruns")
 EXPERIMENT_NAME = "youtube-viral"
 
 def setup_mlflow():
+    print(BASE_DIR)
     (BASE_DIR / "mlruns").mkdir(exist_ok=True)  # ensure folder exists
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(EXPERIMENT_NAME)
-    
 def run_experiment(run_name, model, X_tr, y_tr, X_ev, y_ev, params=None, tags=None):
 
     model.fit(X_tr, y_tr)
@@ -33,6 +36,7 @@ def run_experiment(run_name, model, X_tr, y_tr, X_ev, y_ev, params=None, tags=No
         'roc_auc'  : roc_auc_score(y_ev, y_prob) if y_prob is not None else None,
     }
     tn, fp, fn, tp = confusion_matrix(y_ev, y_pred).ravel()
+    print(f"Confusion Matrix: TN={tn}, FP={fp}, FN={fn}, TP={tp}")
     metrics['Wasted_Resources_False_Positive'] = fp / (fp + tp) if (fp + tp) > 0 else None ## costly for marketers
     metrics['Missed_Trending_Videos'] = fn / (fn + tp) if (fn + tp) > 0 else None ## Wasted opportunity
 
