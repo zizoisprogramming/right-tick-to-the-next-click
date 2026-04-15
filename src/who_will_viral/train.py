@@ -1,27 +1,23 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import json, warnings
-warnings.filterwarnings("ignore")
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from imblearn.over_sampling import SMOTE
-from imblearn.under_sampling import RandomUnderSampler
-from imblearn.over_sampling import RandomOverSampler
-from sklearn.naive_bayes import GaussianNB
-from imblearn.under_sampling import TomekLinks
-from sklearn.metrics import (
-    f1_score,
-    classification_report
-)
 import os
+import warnings
+
 import optuna
-from xgboost import XGBClassifier
-from sklearn.svm import LinearSVC
-from sklearn.ensemble import AdaBoostClassifier
-from sklearn.neighbors import KNeighborsClassifier
+import pandas as pd
+from imblearn.over_sampling import SMOTE, RandomOverSampler
+from imblearn.under_sampling import RandomUnderSampler, TomekLinks
+from sklearn.ensemble import AdaBoostClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, f1_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-from .mlflow_utilities import setup_mlflow, run_experiment
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import LinearSVC
+from xgboost import XGBClassifier
+
+from .mlflow_utilities import run_experiment, setup_mlflow
+
+warnings.filterwarnings("ignore")
+
 class ModelTrainer:
     def __init__(self, train_path, val_path, test_path, cv=5):
         self.cv = cv
@@ -83,7 +79,9 @@ class ModelTrainer:
             cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
-        metrics, model = run_experiment(f"Gaussian NB {sampling}", search, X_train, y_train, self.X_val, self.y_val)
+        metrics, model = run_experiment(f"Gaussian NB {sampling}",
+                search, X_train, y_train, self.X_val, self.y_val
+        )
         if metrics['f1'] > self.best_f1:
             self.best_f1 = metrics['f1']
             self.best_model = model
@@ -104,7 +102,9 @@ class ModelTrainer:
             cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
-        metrics, model = run_experiment(f"Grid Search for KNN {sampling}", search, X_train, y_train, self.X_val, self.y_val)
+        metrics, model = run_experiment(f"Grid Search for KNN {sampling}",
+                search, X_train, y_train, self.X_val, self.y_val
+        )
         if metrics['f1'] > self.best_f1:
             self.best_f1 = metrics['f1']
             self.best_model = model
@@ -125,7 +125,9 @@ class ModelTrainer:
             scoring='f1_macro',
             n_iter=15
         )
-        metrics, model = run_experiment(f"Randomized Search for AdaBoost {sampling}", search, X_train, y_train, self.X_val, self.y_val)
+        metrics, model = run_experiment(f"Randomized Search for AdaBoost {sampling}",
+                            search, X_train, y_train, self.X_val, self.y_val
+                        )
         if metrics['f1'] > self.best_f1:
             self.best_f1 = metrics['f1']
             self.best_model = model
@@ -134,7 +136,9 @@ class ModelTrainer:
     def train_svc(self, sampling = None):
         sampling = "" if sampling is None else sampling
         X_train, y_train = self.get_sampled_data(sampling)
-        svm_linear = LinearSVC(loss='squared_hinge', class_weight= 'balanced' if sampling == 'balanced' else None)
+        svm_linear = LinearSVC(loss='squared_hinge',
+                    class_weight= 'balanced' if sampling == 'balanced' else None
+        )
         param_grid = {
             'penalty' : ['l1','l2'],
             'C': [0.1, 1, 10]
@@ -145,7 +149,9 @@ class ModelTrainer:
             cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
-        metrics, model = run_experiment(f"Grid Search for LinearSVC with squared_hinge loss {sampling}", search, X_train, y_train, self.X_val, self.y_val)
+        metrics, model = run_experiment(f"Grid Search for LinearSVC with squared_hinge loss {sampling}",
+                search, X_train, y_train, self.X_val, self.y_val
+            )
         if metrics['f1'] > self.best_f1:
             self.best_f1 = metrics['f1']
             self.best_model = model
@@ -160,9 +166,11 @@ class ModelTrainer:
             'min_samples_split': [2, 5, 10]
         }
         grid_search = GridSearchCV(
-            estimator=RandomForestClassifier(random_state=42, class_weight='balanced' if sampling == 'balanced' else None),
+            estimator=RandomForestClassifier(random_state=42,
+                class_weight='balanced' if sampling == 'balanced' else None
+            ),
             param_grid=param_grid,
-            scoring='f1_macro',        
+            scoring='f1_macro',
             cv=self.cv,
             n_jobs=-1,
             verbose=1
@@ -172,13 +180,13 @@ class ModelTrainer:
         best_model = grid_search.best_estimator_
         rf_metrics, rf_model = run_experiment(
             run_name=f'RF , GridSearch best {sampling}',
-            model=best_model,   
+            model=best_model,
             X_ev=self.X_val,
             y_ev=self.y_val,
             X_tr=X_train,
             y_tr=y_train,
             params={**grid_search.best_params_, 'model': 'RandomForest', 'search': 'GridSearchCV'},
-            tags={'stage': 'hyperparameter_tuning'}, 
+            tags={'stage': 'hyperparameter_tuning'},
             skip_fit=True
         )
         if rf_metrics['f1'] > self.best_f1:
@@ -200,7 +208,9 @@ class ModelTrainer:
             cv=self.cv,  # Use 5 fold on training set
             scoring='f1_macro',
         )
-        metrics, model = run_experiment(f"Grid Search for Logistic Regression {sampling}", search, X_train, y_train, self.X_val, self.y_val)
+        metrics, model = run_experiment(f"Grid Search for Logistic Regression {sampling}",
+                    search, X_train, y_train, self.X_val, self.y_val
+        )
         if metrics['f1'] > self.best_f1:
             self.best_f1 = metrics['f1']
             self.best_model = model
@@ -217,7 +227,7 @@ class ModelTrainer:
                 'max_depth': trial.suggest_int('max_depth', 3, 15),
                 'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
                 'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                'scale_pos_weight': self.get_class_ratio(y_train),  
+                'scale_pos_weight': self.get_class_ratio(y_train),
                 'random_state': 42,
                 'n_jobs': -1
             }
@@ -228,7 +238,10 @@ class ModelTrainer:
 
         study = optuna.create_study(direction='maximize')
         study.optimize(objective, n_trials=50)
-        best_xgb = XGBClassifier(**study.best_params, scale_pos_weight=self.get_class_ratio(self.y_train), random_state=42)
+        best_xgb = XGBClassifier(**study.best_params,
+                            scale_pos_weight=self.get_class_ratio(self.y_train),
+                            random_state=42
+                    )
         metrics, model = run_experiment(
             run_name=f'XGBoost, Optuna best, {sampling}',
             model=best_xgb,
@@ -254,7 +267,7 @@ class ModelTrainer:
         print(f"Test Report for Best Model: {self.best_model_name}")
         print(report)
         return report
-    
+
 if __name__ == "__main__":
     if not os.getenv('CI'):
         trainer = ModelTrainer(
