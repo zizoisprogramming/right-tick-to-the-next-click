@@ -9,6 +9,7 @@ VALIDATE = src.who_will_viral.validate
 CLEAN = src.who_will_viral.clean
 VALIDATE_CLEANED = src.who_will_viral.validation_cleaned
 FEATURE = src/who_will_viral/feature_engineering.py
+TRAIN = src.who_will_viral.train
 
 
 # Default target
@@ -34,9 +35,12 @@ validate_cleaned:
 feature:
 	uv run python $(FEATURE)
 
+train:
+	$(PYTHON) $(TRAIN)
+
 
 # Full pipeline
-pipeline: acquire validate clean validate_cleaned feature
+pipeline: acquire validate clean validate_cleaned feature train
 
 install:
 	uv sync
@@ -56,6 +60,7 @@ help:
 	@echo "make clean_data     - Run cleaning only"
 	@echo "make validate_cleaned  - Run validation after cleaning only"
 	@echo "make feature   - Run feature engineering only"
+	@echo "make train     - Run training only"
 	@echo "make venv      - Create virtual environment"
 	@echo "make install   - Install dependencies"
 	@echo "make freeze    - Freeze deps to requirements.txt"
