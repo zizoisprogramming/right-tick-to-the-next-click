@@ -25,13 +25,19 @@ dependencies = [
   "emoji>=2.15.0",
   "scikit-learn>=1.8.0",
   "sentence-transformers>=5.3.0",
-  "pandas>=3.0.2",
+  "pandas>=2.0",
   "requests>=2.33.1",
   "logging>=0.4.9.6",
   "google-api-python-client>=2.193.0",
   "great-expectations>=1.16.0",
   "bs4>=0.0.2",
   "python-dotenv>=1.2.2",
+  "matplotlib>=3.10.8",
+  "imblearn>=0.0",
+  "optuna>=4.8.0",
+  "xgboost>=3.2.0",
+  "mlflow>=2.14.0",
+  "protobuf<4",
 ]
 requires-python = ">=3.12,<3.14"
 
