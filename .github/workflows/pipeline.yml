@@ -206,7 +206,7 @@ jobs:
           name: features-data
           path: ./data/youtube/extracted.csv
 
-  modelling:
+  modeling:
     needs: [feature-engineering]
     runs-on: ubuntu-latest
     steps:
